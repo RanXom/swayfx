@@ -7,6 +7,13 @@
 struct sway_container;
 struct sway_server;
 
+enum animation_easing {
+	ANIMATION_EASING_LINEAR,
+	ANIMATION_EASING_EASE_IN,
+	ANIMATION_EASING_EASE_OUT,
+	ANIMATION_EASING_EASE_IN_OUT,
+};
+
 // TODO: make animation just a pointer to progress, make multiplier and callback private
 struct animation {
 	struct wl_list link;
@@ -14,6 +21,7 @@ struct animation {
 	void *data;
 	float multiplier;
 	bool initialized;
+	enum animation_easing easing;
 	void (*update)(void *);
 	void (*complete)(void *);
 };

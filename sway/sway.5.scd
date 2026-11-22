@@ -875,8 +875,21 @@ The default colors are:
 	- *blur_ignore_transparent* <enable|disable>
 	- *shadows* <enable|disable>
 	- *corner_radius* <integer>
+	- *animation* <none|fade|slide>
+	- *animation_easing* <linear|ease-in|ease-out|ease-in-out>
+	- *animation_offset_x* <pixels>
+	- *animation_offset_y* <pixels>
 	- *reset* Resets all previously applied effects
 	- *reset* To reset/disable all previously applied effects to the layer application
+
+	Layer animations run when the surface is mapped and when it is unmapped.
+	The close animation uses a snapshot of the last surface buffer, so it can
+	fade or slide out after the client withdraws the surface. Animations use
+	*animation_duration_ms*. *fade* is the default and *ease-out* is the
+	default easing. *slide* starts at the configured offset and moves to the
+	surface's normal position while fading in, then moves back toward that
+	offset while fading out. A negative _animation_offset_y_ slides down from
+	above; a positive value slides up from below.
 
 	Example:
 
@@ -886,6 +899,9 @@ The default colors are:
 			blur_ignore_transparent enable;
 			shadows enable;
 			corner_radius 6;
+			animation slide;
+			animation_easing ease-out;
+			animation_offset_y -40;
 		}
 
 	SwayIPC Example (you can only set one effect at a time through `swaymsg`):

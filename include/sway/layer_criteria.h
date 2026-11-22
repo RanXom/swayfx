@@ -1,4 +1,11 @@
 #include <stdbool.h>
+#include "sway/animation_manager.h"
+
+enum layer_animation {
+	LAYER_ANIMATION_NONE,
+	LAYER_ANIMATION_FADE,
+	LAYER_ANIMATION_SLIDE,
+};
 
 struct layer_criteria {
 	char *namespace;
@@ -9,6 +16,11 @@ struct layer_criteria {
 	bool blur_xray;
 	bool blur_ignore_transparent;
 	int corner_radius;
+
+	enum layer_animation animation;
+	enum animation_easing animation_easing;
+	int animation_offset_x;
+	int animation_offset_y;
 };
 
 void layer_criteria_destroy(struct layer_criteria *criteria);

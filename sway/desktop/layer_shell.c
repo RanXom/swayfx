@@ -8,6 +8,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/box.h>
 #include "log.h"
 #include "sway/scene_descriptor.h"
 #include "sway/desktop/transaction.h"
@@ -60,6 +61,10 @@ void layer_apply_criteria(struct sway_layer_surface *surface, struct layer_crite
 		surface->blur_xray = criteria->blur_xray;
 		surface->blur_ignore_transparent = criteria->blur_ignore_transparent;
 		surface->shadow_enabled = criteria->shadow_enabled;
+		surface->animation_type = criteria->animation;
+		surface->animation_easing = criteria->animation_easing;
+		surface->animation_offset_x = criteria->animation_offset_x;
+		surface->animation_offset_y = criteria->animation_offset_y;
 	} else {
 		// Reset
 		surface->corner_radius = 0;
@@ -67,6 +72,10 @@ void layer_apply_criteria(struct sway_layer_surface *surface, struct layer_crite
 		surface->blur_xray = false;
 		surface->blur_ignore_transparent = false;
 		surface->shadow_enabled = false;
+		surface->animation_type = LAYER_ANIMATION_FADE;
+		surface->animation_easing = ANIMATION_EASING_EASE_OUT;
+		surface->animation_offset_x = 0;
+		surface->animation_offset_y = 0;
 	}
 }
 
@@ -77,6 +86,211 @@ static void layer_parse_criteria(struct sway_layer_surface *surface) {
 	}
 	struct layer_criteria *criteria = layer_criteria_for_namespace(surface->layer_surface->namespace);
 	layer_apply_criteria(surface, criteria);
+}
+
+static void set_node_opacity(struct wlr_scene_node *node, float opacity) {
+	if (node->type == WLR_SCENE_NODE_BUFFER) {
+		wlr_scene_buffer_set_opacity(wlr_scene_buffer_from_node(node), opacity);
+	} else if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &tree->children, link) {
+			set_node_opacity(child, opacity);
+		}
+	}
+}
+
+static void layer_set_opacity(struct sway_layer_surface *surface, float opacity) {
+	surface->animation_alpha = opacity;
+	set_node_opacity(&surface->scene->tree->node, opacity);
+
+	if (surface->blur_node) {
+		wlr_scene_blur_set_alpha(surface->blur_node, opacity);
+	}
+	if (surface->shadow_node) {
+		float color[4] = {
+			config->shadow_color[0] * opacity,
+			config->shadow_color[1] * opacity,
+			config->shadow_color[2] * opacity,
+			config->shadow_color[3] * opacity,
+		};
+		wlr_scene_shadow_set_color(surface->shadow_node, color);
+	}
+}
+
+static void layer_apply_animation_offset(struct sway_layer_surface *surface) {
+	int x = surface->base_x;
+	int y = surface->base_y;
+	if (surface->animation_type == LAYER_ANIMATION_SLIDE) {
+		x += (int)get_animated_value(surface->animation_offset_x, 0,
+			&surface->animation);
+		y += (int)get_animated_value(surface->animation_offset_y, 0,
+			&surface->animation);
+	}
+	wlr_scene_node_set_position(&surface->scene->tree->node, x, y);
+}
+
+static void layer_animation_update(void *data) {
+	struct sway_layer_surface *surface = data;
+	float alpha = get_animated_value(surface->from_alpha, 1.0f,
+		&surface->animation);
+	layer_set_opacity(surface, alpha);
+	layer_apply_animation_offset(surface);
+}
+
+static void layer_animation_complete(void *data) {
+	layer_animation_update(data);
+}
+
+struct layer_close_animation {
+	struct wlr_scene_buffer *snapshot;
+	struct animation animation;
+	float from_alpha;
+	float current_alpha;
+	int base_x;
+	int base_y;
+	int offset_x;
+	int offset_y;
+	bool slide;
+	struct wl_listener snapshot_destroy;
+};
+
+static struct wlr_scene_buffer *find_main_buffer(struct wlr_scene_node *node,
+		struct wlr_surface *main_surface) {
+	if (node->type == WLR_SCENE_NODE_BUFFER) {
+		struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+		struct wlr_scene_surface *scene_surface =
+			wlr_scene_surface_try_from_buffer(buffer);
+		if (scene_surface && scene_surface->surface == main_surface) {
+			return buffer;
+		}
+		return NULL;
+	}
+	if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &tree->children, link) {
+			struct wlr_scene_buffer *buffer =
+				find_main_buffer(child, main_surface);
+			if (buffer) {
+				return buffer;
+			}
+		}
+	}
+	return NULL;
+}
+
+static void layer_update_snapshot(struct sway_layer_surface *surface) {
+	if (!surface->snapshot) {
+		return;
+	}
+	struct wlr_scene_buffer *main = find_main_buffer(
+		&surface->scene->tree->node, surface->layer_surface->surface);
+	if (!main || !main->buffer) {
+		return;
+	}
+
+	if (surface->snapshot->buffer != main->buffer) {
+		wlr_scene_buffer_set_buffer(surface->snapshot, main->buffer);
+	}
+	wlr_scene_buffer_set_dest_size(surface->snapshot, main->dst_width,
+		main->dst_height);
+	wlr_scene_buffer_set_transform(surface->snapshot, main->transform);
+	wlr_scene_buffer_set_filter_mode(surface->snapshot, main->filter_mode);
+	if (wlr_fbox_empty(&main->src_box)) {
+		struct wlr_fbox empty = {0};
+		wlr_scene_buffer_set_source_box(surface->snapshot, &empty);
+	} else {
+		wlr_scene_buffer_set_source_box(surface->snapshot, &main->src_box);
+	}
+	wlr_scene_buffer_set_corner_radii(surface->snapshot,
+		corner_radii_all(surface->corner_radius));
+	surface->snapshot_offset_x = main->node.x;
+	surface->snapshot_offset_y = main->node.y;
+}
+
+static void layer_close_update(void *data) {
+	struct layer_close_animation *close = data;
+	float alpha = get_animated_value(close->from_alpha, 0.0f,
+		&close->animation);
+	close->current_alpha = alpha;
+	wlr_scene_buffer_set_opacity(close->snapshot, alpha);
+
+	int x = close->base_x;
+	int y = close->base_y;
+	if (close->slide) {
+		x += (int)get_animated_value(0, close->offset_x, &close->animation);
+		y += (int)get_animated_value(0, close->offset_y, &close->animation);
+	}
+	wlr_scene_node_set_position(&close->snapshot->node, x, y);
+}
+
+static void layer_close_destroy(struct wl_listener *listener, void *data) {
+	struct layer_close_animation *close =
+		wl_container_of(listener, close, snapshot_destroy);
+	finish_animation(&close->animation);
+	wl_list_remove(&close->snapshot_destroy.link);
+	free(close);
+}
+
+static void layer_close_complete(void *data) {
+	struct layer_close_animation *close = data;
+	wlr_scene_node_destroy(&close->snapshot->node);
+}
+
+static void layer_start_close_animation(struct sway_layer_surface *surface) {
+	if (!surface->snapshot || !surface->snapshot->buffer ||
+			surface->animation_type == LAYER_ANIMATION_NONE ||
+			config->animation_duration_ms <= 0) {
+		return;
+	}
+
+	struct layer_close_animation *close = calloc(1, sizeof(*close));
+	if (!close) {
+		return;
+	}
+
+	close->snapshot = surface->snapshot;
+	surface->snapshot = NULL;
+	close->from_alpha = surface->animation_alpha;
+	close->current_alpha = surface->animation_alpha;
+	close->base_x = surface->scene->tree->node.x + surface->snapshot_offset_x;
+	close->base_y = surface->scene->tree->node.y + surface->snapshot_offset_y;
+	close->offset_x = surface->animation_offset_x;
+	close->offset_y = surface->animation_offset_y;
+	close->slide = surface->animation_type == LAYER_ANIMATION_SLIDE;
+	close->animation = init_animation(close);
+	close->animation.easing = surface->animation_easing;
+
+	wlr_scene_node_set_enabled(&close->snapshot->node, true);
+	wlr_scene_node_set_position(&close->snapshot->node, close->base_x,
+		close->base_y);
+	wlr_scene_buffer_set_opacity(close->snapshot, close->from_alpha);
+
+	if (!scene_descriptor_assign(&close->snapshot->node,
+			SWAY_SCENE_DESC_LAYER_CLOSE, close)) {
+		wlr_scene_node_destroy(&close->snapshot->node);
+		free(close);
+		return;
+	}
+
+	close->snapshot_destroy.notify = layer_close_destroy;
+	wl_signal_add(&close->snapshot->node.events.destroy,
+		&close->snapshot_destroy);
+
+	add_animation(&close->animation, layer_close_update, layer_close_complete);
+	layer_close_update(close);
+	start_animations();
+}
+
+bool layer_close_animation_apply(struct wlr_scene_buffer *buffer) {
+	struct layer_close_animation *close = scene_descriptor_try_get(
+		&buffer->node, SWAY_SCENE_DESC_LAYER_CLOSE);
+	if (!close) {
+		return false;
+	}
+	wlr_scene_buffer_set_opacity(buffer, close->current_alpha);
+	return true;
 }
 
 static void arrange_surface(struct sway_output *output, const struct wlr_box *full_area,
@@ -125,6 +339,9 @@ static void arrange_surface(struct sway_output *output, const struct wlr_box *fu
 		}
 
 		wlr_scene_layer_surface_v1_configure(surface->scene, full_area, usable_area);
+		surface->base_x = surface->scene->tree->node.x;
+		surface->base_y = surface->scene->tree->node.y;
+		layer_apply_animation_offset(surface);
 	}
 }
 
@@ -245,6 +462,14 @@ static struct sway_layer_surface *sway_layer_surface_create(
 	surface->blur_ignore_transparent = false;
 	surface->shadow_enabled = false;
 
+	surface->animation = init_animation(surface);
+	surface->animation_type = LAYER_ANIMATION_FADE;
+	surface->animation_easing = ANIMATION_EASING_EASE_OUT;
+	surface->animation_offset_x = 0;
+	surface->animation_offset_y = 0;
+	surface->from_alpha = 1.0f;
+	surface->animation_alpha = 1.0f;
+
 	bool failed = false;
 	surface->blur_node = alloc_scene_blur(surface->tree, 0, 0, &failed);
 	surface->shadow_node = alloc_scene_shadow(surface->tree, 0, 0,
@@ -254,6 +479,11 @@ static struct sway_layer_surface *sway_layer_surface_create(
 		wlr_scene_node_destroy(&popups->node);
 		free(surface);
 		return NULL;
+	}
+
+	surface->snapshot = wlr_scene_buffer_create(surface->tree->node.parent, NULL);
+	if (surface->snapshot) {
+		wlr_scene_node_set_enabled(&surface->snapshot->node, false);
 	}
 
 	return surface;
@@ -322,6 +552,15 @@ static void handle_node_destroy(struct wl_listener *listener, void *data) {
 
 	wlr_scene_node_destroy(&layer->popups->node);
 
+	if (layer->snapshot) {
+		wlr_scene_node_destroy(&layer->snapshot->node);
+		layer->snapshot = NULL;
+	}
+
+	if (layer->animation.initialized) {
+		finish_animation(&layer->animation);
+	}
+
 	wl_list_remove(&layer->map.link);
 	wl_list_remove(&layer->unmap.link);
 	wl_list_remove(&layer->surface_commit.link);
@@ -362,6 +601,8 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
 		arrange_layers(surface->output);
 		transaction_commit_dirty();
 	}
+
+	layer_update_snapshot(surface);
 }
 
 static void handle_map(struct wl_listener *listener, void *data) {
@@ -375,6 +616,23 @@ static void handle_map(struct wl_listener *listener, void *data) {
 	wlr_scene_node_lower_to_bottom(&surface->shadow_node->node);
 	wlr_scene_node_lower_to_bottom(&surface->blur_node->node);
 
+	// Configure before capturing the base position for the slide animation.
+	arrange_layers(surface->output);
+	layer_update_snapshot(surface);
+
+	if (surface->animation_type != LAYER_ANIMATION_NONE &&
+			config->animation_duration_ms > 0) {
+		surface->from_alpha = 0.0f;
+		surface->animation.easing = surface->animation_easing;
+		add_animation(&surface->animation, layer_animation_update,
+			layer_animation_complete);
+		layer_animation_update(surface);
+		start_animations();
+	} else {
+		layer_set_opacity(surface, 1.0f);
+		layer_apply_animation_offset(surface);
+	}
+
 	// focus on new surface
 	if (layer_surface->current.keyboard_interactive &&
 			(layer_surface->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY ||
@@ -387,7 +645,6 @@ static void handle_map(struct wl_listener *listener, void *data) {
 				seat_set_focus_layer(seat, layer_surface);
 			}
 		}
-		arrange_layers(surface->output);
 	}
 
 	cursor_rebase_all();
@@ -396,6 +653,15 @@ static void handle_map(struct wl_listener *listener, void *data) {
 static void handle_unmap(struct wl_listener *listener, void *data) {
 	struct sway_layer_surface *surface = wl_container_of(
 			listener, surface, unmap);
+
+	layer_start_close_animation(surface);
+
+	if (surface->animation.initialized) {
+		finish_animation(&surface->animation);
+	}
+	layer_set_opacity(surface, 1.0f);
+	layer_apply_animation_offset(surface);
+
 	struct sway_seat *seat;
 	wl_list_for_each(seat, &server.input->seats, link) {
 		if (seat->focused_layer == surface->layer_surface) {

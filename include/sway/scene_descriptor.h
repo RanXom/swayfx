@@ -20,6 +20,7 @@ enum sway_scene_descriptor_type {
 	SWAY_SCENE_DESC_POPUP,
 	SWAY_SCENE_DESC_DRAG_ICON,
 	SWAY_SCENE_DESC_SAVED_BUFFER,
+	SWAY_SCENE_DESC_LAYER_CLOSE,
 };
 
 bool scene_descriptor_assign(struct wlr_scene_node *node,
