@@ -752,6 +752,12 @@ The default colors are:
 *blur_xray* enable|disable
 	Sets whether blur should only display the background.
 
+*session_lock_xray* enable|disable
+	Keep rendering the live desktop below the session lock surface. This
+	allows a locker to fade its own surface in and out over the desktop.
+	The desktop remains non-interactive while the session is locked.
+	The default is disabled.
+
 *blur_passes* <value>
 	Adjusts the blur passes of windows between 0 (disabled) and 10
 	while 2 is the default value.

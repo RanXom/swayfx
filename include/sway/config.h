@@ -502,6 +502,7 @@ struct sway_config {
 
 	bool blur_enabled;
 	bool blur_xray;
+	bool session_lock_xray;
 	struct blur_data blur_data;
 
 	bool shadow_enabled;

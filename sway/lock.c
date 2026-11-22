@@ -2,6 +2,7 @@
 #include <scenefx/types/wlr_scene.h>
 #include <wlr/types/wlr_session_lock_v1.h>
 #include "log.h"
+#include "sway/config.h"
 #include "sway/input/cursor.h"
 #include "sway/input/keyboard.h"
 #include "sway/input/seat.h"
@@ -89,6 +90,23 @@ static void lock_output_reconfigure(struct sway_session_lock_output *output) {
 	}
 }
 
+void sway_session_lock_update_background(void) {
+	if (!server.session_lock.lock) {
+		return;
+	}
+
+	struct sway_session_lock *lock = server.session_lock.lock;
+	struct sway_session_lock_output *output;
+	wl_list_for_each(output, &lock->outputs, link) {
+		wlr_scene_rect_set_color(output->background, (float[4]){
+			lock->abandoned ? 1.f : 0.f,
+			0.f,
+			0.f,
+			(lock->abandoned || !config->session_lock_xray) ? 1.f : 0.f,
+		});
+	}
+}
+
 void arrange_locks(void) {
 	if (server.session_lock.lock == NULL) {
 		return;
@@ -129,8 +147,7 @@ static void handle_new_surface(struct wl_listener *listener, void *data) {
 	lock_output_reconfigure(lock_output);
 }
 
-static void sway_session_lock_output_destroy(struct sway_session_lock_output *output) {
-	if (output->surface) {
+static void sway_session_lock_output_destroy(struct sway_session_lock_output *output) {	if (output->surface) {
 		refocus_output(output);
 		wl_list_remove(&output->surface_destroy.link);
 		wl_list_remove(&output->surface_map.link);
@@ -167,7 +184,7 @@ static struct sway_session_lock_output *session_lock_output_create(
 		lock->abandoned ? 1.f : 0.f,
 		0.f,
 		0.f,
-		1.f,
+		(lock->abandoned || !config->session_lock_xray) ? 1.f : 0.f,
 	});
 	if (!background) {
 		sway_log(SWAY_ERROR, "failed to allocate a session lock output scene background");
