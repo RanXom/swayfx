@@ -321,7 +321,15 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 		// containers, we resize the container to match. For tiling containers,
 		// we only recenter the surface.
 		memcpy(&view->geometry, new_geo, sizeof(struct wlr_box));
-		if (container_is_floating(view->container)) {
+		// If the compositor is waiting for this client to acknowledge a
+		// configure it sent (for example, an interactive floating resize),
+		// this commit is the client's constrained response to that configure,
+		// not a user-initiated size change. Adopting the client's rounded size
+		// here can undo the resize, and clients that round to whole cells (like
+		// foot at fractional scale) then feed back smaller sizes on every
+		// commit, stalling the resize. Keep the compositor's requested size.
+		if (container_is_floating(view->container) &&
+				!view->container->node.instruction) {
 			view_update_size(view);
 			// Only set the toplevel size the current container actually has a size.
 			if (view->container->current.width) {
