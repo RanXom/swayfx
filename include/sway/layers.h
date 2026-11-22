@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
+#include "sway/animation_manager.h"
 #include "sway/layer_criteria.h"
 #include "sway/tree/view.h"
 
@@ -28,6 +29,20 @@ struct sway_layer_surface {
 	bool blur_xray;
 	bool blur_ignore_transparent;
 	int corner_radius;
+
+	struct animation animation;
+	enum layer_animation animation_type;
+	enum animation_easing animation_easing;
+	int animation_offset_x;
+	int animation_offset_y;
+	int base_x;
+	int base_y;
+	float from_alpha;
+	float animation_alpha;
+
+	struct wlr_scene_buffer *snapshot;
+	int snapshot_offset_x;
+	int snapshot_offset_y;
 
 	struct wl_list link; // sway_output.layer_surfaces
 
@@ -55,6 +70,8 @@ struct wlr_layer_surface_v1 *toplevel_layer_surface_from_surface(
 void arrange_layers(struct sway_output *output);
 
 void layer_apply_criteria(struct sway_layer_surface *surface, struct layer_criteria *criteria);
+
+bool layer_close_animation_apply(struct wlr_scene_buffer *buffer);
 
 void destroy_layers(struct sway_output *output);
 

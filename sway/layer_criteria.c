@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdlib.h>
 #include <string.h>
 #include "list.h"
 #include "log.h"
@@ -13,6 +14,10 @@ static void init_criteria_effects(struct layer_criteria *criteria) {
 	criteria->blur_xray = false;
 	criteria->blur_ignore_transparent = false;
 	criteria->shadow_enabled = false;
+	criteria->animation = LAYER_ANIMATION_FADE;
+	criteria->animation_easing = ANIMATION_EASING_EASE_OUT;
+	criteria->animation_offset_x = 0;
+	criteria->animation_offset_y = 0;
 }
 
 static void copy_criteria_effects(struct layer_criteria *dst, struct layer_criteria *src) {
@@ -21,6 +26,10 @@ static void copy_criteria_effects(struct layer_criteria *dst, struct layer_crite
 	dst->blur_xray = src->blur_xray;
 	dst->blur_ignore_transparent = src->blur_ignore_transparent;
 	dst->shadow_enabled = src->shadow_enabled;
+	dst->animation = src->animation;
+	dst->animation_easing = src->animation_easing;
+	dst->animation_offset_x = src->animation_offset_x;
+	dst->animation_offset_y = src->animation_offset_y;
 }
 
 static bool layer_criteria_find(char *namespace,
@@ -91,6 +100,58 @@ static bool layer_criteria_parse(struct layer_criteria *criteria) {
 					"Invalid layer_effects corner_radius size! Got \"%s\"",
 					argv[1]);
 			return false;
+		} else if (strcmp(argv[0], "animation") == 0) {
+			if (argc < 2) {
+				sway_log(SWAY_ERROR, "layer_effects animation requires a value");
+				return false;
+			}
+			if (strcmp(argv[1], "none") == 0) {
+				criteria->animation = LAYER_ANIMATION_NONE;
+			} else if (strcmp(argv[1], "fade") == 0) {
+				criteria->animation = LAYER_ANIMATION_FADE;
+			} else if (strcmp(argv[1], "slide") == 0) {
+				criteria->animation = LAYER_ANIMATION_SLIDE;
+			} else {
+				sway_log(SWAY_ERROR,
+						"Invalid layer_effects animation! Got \"%s\"",
+						argv[1]);
+				return false;
+			}
+			continue;
+		} else if (strcmp(argv[0], "animation_easing") == 0) {
+			if (argc < 2) {
+				sway_log(SWAY_ERROR, "layer_effects animation_easing requires a value");
+				return false;
+			}
+			if (strcmp(argv[1], "linear") == 0) {
+				criteria->animation_easing = ANIMATION_EASING_LINEAR;
+			} else if (strcmp(argv[1], "ease-in") == 0) {
+				criteria->animation_easing = ANIMATION_EASING_EASE_IN;
+			} else if (strcmp(argv[1], "ease-out") == 0) {
+				criteria->animation_easing = ANIMATION_EASING_EASE_OUT;
+			} else if (strcmp(argv[1], "ease-in-out") == 0) {
+				criteria->animation_easing = ANIMATION_EASING_EASE_IN_OUT;
+			} else {
+				sway_log(SWAY_ERROR,
+						"Invalid layer_effects animation_easing! Got \"%s\"",
+						argv[1]);
+				return false;
+			}
+			continue;
+		} else if (strcmp(argv[0], "animation_offset_x") == 0) {
+			if (argc < 2) {
+				sway_log(SWAY_ERROR, "layer_effects animation_offset_x requires a value");
+				return false;
+			}
+			criteria->animation_offset_x = atoi(argv[1]);
+			continue;
+		} else if (strcmp(argv[0], "animation_offset_y") == 0) {
+			if (argc < 2) {
+				sway_log(SWAY_ERROR, "layer_effects animation_offset_y requires a value");
+				return false;
+			}
+			criteria->animation_offset_y = atoi(argv[1]);
+			continue;
 		} else {
 			sway_log(SWAY_ERROR, "Invalid layer_effects effect! Got \"%s\"", cmd);
 			return false;

@@ -362,6 +362,8 @@ static void config_defaults(struct sway_config *config) {
 
 	config->blur_enabled = false;
 	config->blur_xray = false;
+	config->session_lock_xray = false;
+	unsetenv("SWAYFX_SESSION_LOCK_XRAY");
 	config->blur_data = blur_data_get_default();
 
 	config->shadow_enabled = false;

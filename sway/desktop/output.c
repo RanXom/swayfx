@@ -243,6 +243,19 @@ static bool could_container_overlap(struct sway_container *con) {
 		(con->current.workspace && con->current.workspace->animation_state.animation.initialized);
 }
 
+static struct sway_layer_surface *layer_surface_for_node(
+		struct wlr_scene_node *node) {
+	for (struct wlr_scene_tree *tree = node->parent; tree;
+			tree = tree->node.parent) {
+		struct sway_layer_surface *layer = scene_descriptor_try_get(
+			&tree->node, SWAY_SCENE_DESC_LAYER_SHELL);
+		if (layer) {
+			return layer;
+		}
+	}
+	return NULL;
+}
+
 void output_configure_scene(struct sway_output *output, struct wlr_scene_node *node,
 		bool has_titlebar, struct sway_container *closest_con) {
 	if (!node->enabled) {
@@ -280,6 +293,9 @@ void output_configure_scene(struct sway_output *output, struct wlr_scene_node *n
 
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
 		struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+		if (layer_close_animation_apply(buffer)) {
+			return;
+		}
 		struct wlr_scene_surface *surface = wlr_scene_surface_try_from_buffer(buffer);
 
 		struct wlr_layer_surface_v1 *wlr_layer_surface = NULL;
@@ -299,6 +315,11 @@ void output_configure_scene(struct sway_output *output, struct wlr_scene_node *n
 		// we're configuring
 		if (output) {
 			buffer->filter_mode = get_scale_filter(output, buffer);
+		}
+
+		struct sway_layer_surface *layer = layer_surface_for_node(&buffer->node);
+		if (layer) {
+			opacity *= layer->animation_alpha;
 		}
 
 		wlr_scene_buffer_set_opacity(buffer, opacity);

@@ -21,20 +21,38 @@ struct animation init_animation(void *data) {
 		.progress = 0.0f,
 		.multiplier = 0.0f,
 		.initialized = false,
+		.easing = ANIMATION_EASING_EASE_OUT,
 		.update = NULL,
 		.complete = NULL,
 	};
 }
 
 static float ease_out_cubic(float p) {
-	return pow(p - 1, 3) + 1;
+	return powf(p - 1.0f, 3.0f) + 1.0f;
+}
+
+static float apply_easing(enum animation_easing easing, float p) {
+	switch (easing) {
+	case ANIMATION_EASING_LINEAR:
+		return p;
+	case ANIMATION_EASING_EASE_IN:
+		return p * p * p;
+	case ANIMATION_EASING_EASE_IN_OUT:
+		if (p < 0.5f) {
+			return 4.0f * p * p * p;
+		}
+		return 1.0f - powf(-2.0f * p + 2.0f, 3.0f) / 2.0f;
+	case ANIMATION_EASING_EASE_OUT:
+	default:
+		return ease_out_cubic(p);
+	}
 }
 
 static int animation_timer() {
 	struct animation *animation, *tmp;
 	wl_list_for_each_reverse_safe(animation, tmp, &animation_manager.animations, link) {
 		animation->progress = MIN(animation->progress + animation_manager.progress_delta, 1.0f);
-		animation->multiplier = ease_out_cubic(animation->progress);
+		animation->multiplier = apply_easing(animation->easing, animation->progress);
 
 		if (animation->update) {
 			animation->update(animation->data);
